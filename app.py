@@ -7,12 +7,12 @@ import os
 from docx import Document
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from PIL import Image
 
 # --- Page Config ---
 st.set_page_config(page_title="Document Architect Pro", layout="wide")
 
 # --- API Key handling ---
+# On Streamlit Cloud, set this in Settings > Secrets
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 # --- Initialize Engines (Cached for performance) ---
@@ -23,7 +23,7 @@ def load_ocr():
 reader = load_ocr()
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- Custom Styling (Matching your Jaman & Dark Navy theme) ---
+# --- Custom Styling (Your Jaman & Dark Navy theme) ---
 st.markdown("""
     <style>
     .stApp { background-color: #020617; color: #f8fafc; }
@@ -46,6 +46,10 @@ st.markdown("""
         text-align: center;
         margin-top: 50px;
     }
+    /* Fixing text visibility in tabs */
+    .stTabs [data-baseweb="tab-panel"] {
+        color: white !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -62,7 +66,7 @@ with st.sidebar:
     for item in st.session_state.history:
         st.write(item)
 
-# --- Main Logic ---
+# --- Main Interface ---
 col1, col2 = st.columns([1, 2])
 
 with col1:
@@ -71,74 +75,32 @@ with col1:
 
 if uploaded_file and submit_btn:
     with st.spinner("Architecting your document..."):
-        # Convert uploaded file to OpenCV format
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=uint8)
-        img = cv2.imdecode(file_bytes, 1)
-        
-        # 1. Image Preprocessing & OCR
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        processed_img = cv2.adaptiveThreshold(
-            cv2.GaussianBlur(gray, (5, 5), 0),
-            255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY, 11, 2
-        )
-        raw_text = " ".join(reader.readtext(processed_img, detail=0))
-
-        if raw_text.strip():
-            # 2. AI Structuring (Groq)
-            prompt = f"""
-            Act as a Professional Document Architect.
-            Convert this OCR text into a beautiful digital document:
-            - Use # for the Main Title
-            - Use ## for Section Headings
-            - Use bolding (**) for important technical terms
-            - End with a section titled '--- FINAL SUMMARY ---'
-            TEXT: {raw_text}
-            """
-
-            chat = client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model="llama-3.3-70b-versatile"
+        try:
+            # --- FIX: Added 'np.' before uint8 to resolve NameError ---
+            file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+            img = cv2.imdecode(file_bytes, 1)
+            
+            # 1. Image Preprocessing & OCR
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            processed_img = cv2.adaptiveThreshold(
+                cv2.GaussianBlur(gray, (5, 5), 0),
+                255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 11, 2
             )
-            full_output = chat.choices[0].message.content
+            raw_text = " ".join(reader.readtext(processed_img, detail=0))
 
-            if "--- FINAL SUMMARY ---" in full_output:
-                notes, summary = full_output.split("--- FINAL SUMMARY ---")
-            else:
-                notes, summary = full_output, "Summary included in text."
+            if raw_text.strip():
+                # 2. AI Structuring (Groq)
+                prompt = f"""
+                Act as a Professional Document Architect.
+                Convert this OCR text into a beautiful digital document:
+                - Use # for the Main Title
+                - Use ## for Section Headings
+                - Use bolding (**) for important technical terms
+                - End with a section titled '--- FINAL SUMMARY ---'
+                TEXT: {raw_text}
+                """
 
-            # Update History
-            st.session_state.history.append(f"Note {len(st.session_state.history) + 1}: {notes[:20]}...")
-
-            # 3. Display Results
-            with col2:
-                tab1, tab2, tab3 = st.tabs(["✨ Digital Blueprint", "💡 Executive Summary", "📄 Raw OCR Buffer"])
-                
-                with tab1:
-                    st.markdown(notes)
-                    
-                    # File Exports
-                    doc_path = "Architect_Export.docx"
-                    d = Document()
-                    d.add_heading('Document Architect Pro Export', 0)
-                    d.add_paragraph(notes)
-                    d.save(doc_path)
-                    
-                    with open(doc_path, "rb") as f:
-                        st.download_button("Download DOCX", f, file_name=doc_path)
-
-                with tab2:
-                    st.write(summary.strip())
-
-                with tab3:
-                    st.code(raw_text)
-        else:
-            st.error("❌ No text detected.")
-
-# --- Footer ---
-st.markdown(f"""
-    <div style="border-top: 1px solid #1e293b; padding: 20px;">
-        <p style="text-align: center; color: #94a3b8;">DESIGNED & ENGINEERED BY</p>
-        <div class="signature-name">Muhammad Shoaib Nazz</div>
-    </div>
-    """, unsafe_allow_html=True)
+                chat = client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    model="llama-3.3-70b-versatile
