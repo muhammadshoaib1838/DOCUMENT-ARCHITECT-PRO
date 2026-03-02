@@ -12,10 +12,9 @@ from reportlab.pdfgen import canvas
 st.set_page_config(page_title="Document Architect Pro", layout="wide")
 
 # --- API Key handling ---
-# On Streamlit Cloud, set this in Settings > Secrets
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# --- Initialize Engines (Cached for performance) ---
+# --- Initialize Engines ---
 @st.cache_resource
 def load_ocr():
     return easyocr.Reader(['en'], gpu=False)
@@ -23,7 +22,7 @@ def load_ocr():
 reader = load_ocr()
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- Custom Styling (Your Jaman & Dark Navy theme) ---
+# --- Custom Styling ---
 st.markdown("""
     <style>
     .stApp { background-color: #020617; color: #f8fafc; }
@@ -46,10 +45,6 @@ st.markdown("""
         text-align: center;
         margin-top: 50px;
     }
-    /* Fixing text visibility in tabs */
-    .stTabs [data-baseweb="tab-panel"] {
-        color: white !important;
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -57,16 +52,17 @@ st.markdown("""
 st.markdown("<h1 style='text-align: center;'>🌌 DOCUMENT ARCHITECT PRO</h1>", unsafe_allow_html=True)
 st.markdown('<div class="jaman-tagline">Transforming handwritten chaos into structured digital gold.</div>', unsafe_allow_html=True)
 
-# --- Sidebar History ---
+# --- Session State ---
 if "history" not in st.session_state:
     st.session_state.history = []
 
+# --- Sidebar ---
 with st.sidebar:
     st.markdown("### 🕒 Session History")
     for item in st.session_state.history:
         st.write(item)
 
-# --- Main Interface ---
+# --- Layout ---
 col1, col2 = st.columns([1, 2])
 
 with col1:
@@ -74,33 +70,68 @@ with col1:
     submit_btn = st.button("ARCHITECT DOCUMENT ✨")
 
 if uploaded_file and submit_btn:
-    with st.spinner("Architecting your document..."):
+    with st.spinner("Processing..."):
         try:
-            # --- FIX: Added 'np.' before uint8 to resolve NameError ---
+            # FIX 1: Use np.uint8 to avoid NameError
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
             img = cv2.imdecode(file_bytes, 1)
             
-            # 1. Image Preprocessing & OCR
+            # OCR Processing
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             processed_img = cv2.adaptiveThreshold(
                 cv2.GaussianBlur(gray, (5, 5), 0),
                 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                 cv2.THRESH_BINARY, 11, 2
             )
-            raw_text = " ".join(reader.readtext(processed_img, detail=0))
+            raw_results = reader.readtext(processed_img, detail=0)
+            raw_text = " ".join(raw_results)
 
             if raw_text.strip():
-                # 2. AI Structuring (Groq)
-                prompt = f"""
-                Act as a Professional Document Architect.
-                Convert this OCR text into a beautiful digital document:
-                - Use # for the Main Title
-                - Use ## for Section Headings
-                - Use bolding (**) for important technical terms
-                - End with a section titled '--- FINAL SUMMARY ---'
-                TEXT: {raw_text}
-                """
+                # FIX 2: Cleaned multi-line string to avoid SyntaxError
+                prompt = (
+                    "Act as a Professional Document Architect. "
+                    "Convert this OCR text into a beautiful digital document: "
+                    "- Use # for the Main Title "
+                    "- Use ## for Section Headings "
+                    "- Use bolding (**) for important technical terms "
+                    "- End with a section titled '--- FINAL SUMMARY ---' "
+                    f"TEXT: {raw_text}"
+                )
 
                 chat = client.chat.completions.create(
                     messages=[{"role": "user", "content": prompt}],
-                    model="llama-3.3-70b-versatile
+                    model="llama-3.3-70b-versatile"
+                )
+                full_output = chat.choices[0].message.content
+
+                if "--- FINAL SUMMARY ---" in full_output:
+                    notes, summary = full_output.split("--- FINAL SUMMARY ---")
+                else:
+                    notes, summary = full_output, "Summary included in text."
+
+                # Update State
+                st.session_state.history.append(f"Document {len(st.session_state.history)+1}")
+
+                with col2:
+                    t1, t2, t3 = st.tabs(["✨ Blueprint", "💡 Summary", "📄 Raw"])
+                    with t1:
+                        st.markdown(notes)
+                        # DOCX Export logic
+                        doc = Document()
+                        doc.add_paragraph(notes)
+                        doc.save("output.docx")
+                        with open("output.docx", "rb") as f:
+                            st.download_button("Download DOCX", f, "Architect_Export.docx")
+                    with t2:
+                        st.write(summary.strip())
+                    with t3:
+                        st.text_area("OCR Data", raw_text, height=200)
+            else:
+                st.warning("No text found in image.")
+        except Exception as e:
+            st.error(f"Processing Error: {e}")
+
+# --- Footer ---
+st.markdown("""
+    <div class="signature-name">Muhammad Shoaib Nazz</div>
+    """, unsafe_allow_html=True)
