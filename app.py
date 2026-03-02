@@ -4,45 +4,55 @@ import cv2
 import numpy as np
 from groq import Groq
 from docx import Document
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 import os
 from PIL import Image
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Document Architect Pro", layout="wide")
 
-# --- CSS for High-Contrast "Jaman" Styling ---
+# --- CSS for Visibility and Style ---
 st.markdown("""
     <style>
     .stApp { background-color: #020617; color: #f8fafc; }
+    
+    /* Jaman Tagline Style */
     .jaman-tagline {
         background-color: #4c0519;
-        color: #ffff00;
+        color: #ffff00 !important;
         padding: 15px;
         border-radius: 12px;
         text-align: center;
         font-weight: 900;
         font-size: 1.2em;
         border: 1px solid rgba(255,255,255,0.2);
-        margin-bottom: 20px;
+        margin-bottom: 25px;
     }
-    .signature { color: #c084fc; font-weight: bold; text-align: center; margin-top: 50px; }
+
+    /* Fixing Button Visibility (Dark text on bright button) */
+    div.stButton > button {
+        background: linear-gradient(135deg, #4f46e5 0%, #9333ea 100%) !important;
+        color: white !important;
+        font-weight: bold !important;
+        border: none !important;
+        width: 100%;
+        height: 3em;
+    }
+    
+    .signature { color: #c084fc; font-weight: bold; text-align: center; margin-top: 50px; font-family: 'serif'; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- API Key Handling (Streamlit Secret Format) ---
-# This looks for the key in Streamlit's Secret management system
+# --- API Key Handling ---
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY")
-
-if not GROQ_API_KEY:
-    st.error("⚠️ GROQ_API_KEY not found! Please add it to your Streamlit Secrets.")
-    st.stop()
 
 # --- Initialize Engines ---
 @st.cache_resource
 def load_ocr():
     return easyocr.Reader(['en'], gpu=False)
+
+if not GROQ_API_KEY:
+    st.error("❌ API Key Missing: Please add GROQ_API_KEY to your Streamlit Secrets.")
+    st.stop()
 
 reader = load_ocr()
 client = Groq(api_key=GROQ_API_KEY)
@@ -51,80 +61,86 @@ client = Groq(api_key=GROQ_API_KEY)
 st.title("🌌 DOCUMENT ARCHITECT PRO")
 st.markdown('<div class="jaman-tagline">Transforming handwritten chaos into structured digital gold.</div>', unsafe_allow_html=True)
 
-# --- Sidebar History ---
+# --- Session State ---
 if "history" not in st.session_state:
     st.session_state.history = []
 
-with st.sidebar:
-    st.subheader("🕒 Session History")
-    for entry in st.session_state.history:
-        st.info(entry)
-
-# --- Main Layout ---
+# --- Layout ---
 col1, col2 = st.columns([1, 2])
 
 with col1:
     st.subheader("📸 Upload Source")
-    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+    uploaded_file = st.file_uploader("Drag and drop file here", type=["jpg", "jpeg", "png"])
     
-    if uploaded_file:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image", use_container_width=True)
+    if uploaded_file is not None:
+        # Show preview
+        image_preview = Image.open(uploaded_file)
+        st.image(image_preview, caption="Target Image", use_container_width=True)
         
         if st.button("ARCHITECT DOCUMENT ✨"):
-            with st.spinner("Processing..."):
+            with st.spinner("Analyzing text..."):
                 try:
-                    # 1. OCR Process
+                    # SECURE IMAGE LOADING: Convert to bytes safely for OpenCV
                     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-                    img = cv2.imdecode(file_bytes, 1)
-                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    raw_text = " ".join(reader.readtext(gray, detail=0))
+                    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-                    if not raw_text.strip():
-                        st.error("No text detected in image.")
+                    if img is None:
+                        st.error("Failed to decode image. Try another format.")
                     else:
-                        # 2. AI Structuring
-                        prompt = f"Convert this OCR text into a professional document with headings and bold terms. End with '--- FINAL SUMMARY ---'. TEXT: {raw_text}"
-                        chat = client.chat.completions.create(
-                            messages=[{"role": "user", "content": prompt}],
-                            model="llama-3.3-70b-versatile"
-                        )
-                        full_output = chat.choices[0].message.content
+                        # 1. OCR Process
+                        raw_text = " ".join(reader.readtext(img, detail=0))
                         
-                        if "--- FINAL SUMMARY ---" in full_output:
-                            notes, summary = full_output.split("--- FINAL SUMMARY ---")
+                        if not raw_text.strip():
+                            st.warning("No text found in the image.")
                         else:
-                            notes, summary = full_output, "Included in text."
+                            # 2. AI Structuring
+                            prompt = f"Act as a Document Architect. Format this OCR text into a professional document with Markdown. End with '--- FINAL SUMMARY ---'. TEXT: {raw_text}"
+                            completion = client.chat.completions.create(
+                                messages=[{"role": "user", "content": prompt}],
+                                model="llama-3.3-70b-versatile"
+                            )
+                            full_output = completion.choices[0].message.content
+                            
+                            # Split logic
+                            if "--- FINAL SUMMARY ---" in full_output:
+                                notes, summary = full_output.split("--- FINAL SUMMARY ---")
+                            else:
+                                notes, summary = full_output, "Summary integrated in text."
 
-                        # 3. Save to Session State
-                        st.session_state.notes = notes
-                        st.session_state.summary = summary
-                        st.session_state.raw = raw_text
-                        st.session_state.history.append(f"Note {len(st.session_state.history)+1}: {notes[:20]}...")
+                            # Store results
+                            st.session_state.processed = {"notes": notes, "summary": summary, "raw": raw_text}
+                            st.session_state.history.append(f"Note {len(st.session_state.history)+1}: {notes[:30]}...")
+                            
+                            # Create DOCX
+                            doc = Document()
+                            doc.add_heading('Document Architect Export', 0)
+                            doc.add_paragraph(notes)
+                            doc.save("Architect_Export.docx")
 
-                        # 4. Generate Files
-                        doc = Document()
-                        doc.add_heading('Architect Export', 0)
-                        doc.add_paragraph(notes)
-                        doc.save("export.docx")
-                        
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Processing Error: {str(e)}")
 
 # --- Results Area ---
 with col2:
-    if "notes" in st.session_state:
-        tab1, tab2, tab3 = st.tabs(["✨ Digital Blueprint", "💡 Executive Summary", "📄 Raw OCR"])
+    if "processed" in st.session_state:
+        tab1, tab2, tab3 = st.tabs(["✨ Digital Blueprint", "💡 Executive Summary", "📄 Raw OCR Buffer"])
         
         with tab1:
-            st.markdown(st.session_state.notes)
-            with open("export.docx", "rb") as f:
-                st.download_button("Download DOCX", f, file_name="Architect_Export.docx")
+            st.markdown(st.session_state.processed["notes"])
+            with open("Architect_Export.docx", "rb") as f:
+                st.download_button("📥 Download DOCX", f, file_name="Architect_Export.docx")
         
         with tab2:
-            st.write(st.session_state.summary)
+            st.info(st.session_state.processed["summary"])
             
         with tab3:
-            st.text_area("OCR Result", st.session_state.raw, height=300)
+            st.text_area("Initial Scan Data", st.session_state.processed["raw"], height=400)
+    else:
+        st.info("Upload an image and click 'Architect' to see the results here.")
+
+# --- Footer ---
+st.sidebar.subheader("🕒 Session History")
+for h in st.session_state.history:
+    st.sidebar.text(h)
 
 st.markdown('<div class="signature">DESIGNED & ENGINEERED BY<br>Muhammad Shoaib Nazz</div>', unsafe_allow_html=True)
