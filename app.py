@@ -3,143 +3,142 @@ import easyocr
 import cv2
 import numpy as np
 from groq import Groq
-from docx import Document
 import os
+from docx import Document
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 from PIL import Image
-import io
 
-# --- Page Configuration ---
+# --- Page Config ---
 st.set_page_config(page_title="Document Architect Pro", layout="wide")
 
-# --- CSS for High-Contrast & Button Visibility ---
-st.markdown("""
-    <style>
-    .stApp { background-color: #020617; color: #f8fafc; }
-    
-    .jaman-tagline {
-        background-color: #4c0519;
-        color: #ffff00 !important;
-        padding: 15px;
-        border-radius: 12px;
-        text-align: center;
-        font-weight: 900;
-        font-size: 1.2em;
-        border: 1px solid rgba(255,255,255,0.2);
-        margin-bottom: 25px;
-    }
+# --- API Key handling ---
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-    /* Fixed Button: High visibility white text on purple gradient */
-    div.stButton > button {
-        background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%) !important;
-        color: #ffffff !important;
-        font-weight: bold !important;
-        border: none !important;
-        width: 100%;
-        padding: 10px;
-        font-size: 1.1em;
-        text-transform: uppercase;
-    }
-    
-    .signature { color: #c084fc; font-weight: bold; text-align: center; margin-top: 50px; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- API Key Handling ---
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY")
-
+# --- Initialize Engines (Cached for performance) ---
 @st.cache_resource
 def load_ocr():
     return easyocr.Reader(['en'], gpu=False)
 
-if not GROQ_API_KEY:
-    st.error("❌ GROQ_API_KEY is missing in Streamlit Secrets.")
-    st.stop()
-
 reader = load_ocr()
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- UI Header ---
-st.title("🌌 DOCUMENT ARCHITECT PRO")
+# --- Custom Styling (Matching your Jaman & Dark Navy theme) ---
+st.markdown("""
+    <style>
+    .stApp { background-color: #020617; color: #f8fafc; }
+    .jaman-tagline {
+        background-color: #4c0519; 
+        color: #ffff00;
+        padding: 15px;
+        border-radius: 12px;
+        text-align: center;
+        font-weight: 900;
+        font-size: 1.3em;
+        margin-bottom: 25px;
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+    .signature-name {
+        color: #c084fc;
+        font-size: 1.6em;
+        font-family: serif;
+        font-weight: bold;
+        text-align: center;
+        margin-top: 50px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- Header ---
+st.markdown("<h1 style='text-align: center;'>🌌 DOCUMENT ARCHITECT PRO</h1>", unsafe_allow_html=True)
 st.markdown('<div class="jaman-tagline">Transforming handwritten chaos into structured digital gold.</div>', unsafe_allow_html=True)
 
+# --- Sidebar History ---
 if "history" not in st.session_state:
     st.session_state.history = []
 
+with st.sidebar:
+    st.markdown("### 🕒 Session History")
+    for item in st.session_state.history:
+        st.write(item)
+
+# --- Main Logic ---
 col1, col2 = st.columns([1, 2])
 
 with col1:
-    st.subheader("📸 Upload Source")
-    uploaded_file = st.file_uploader("Drop image here", type=["jpg", "jpeg", "png"])
-    
-    if uploaded_file is not None:
-        # Step 1: Display Image
-        image_preview = Image.open(uploaded_file)
-        st.image(image_preview, caption="Preview", use_container_width=True)
+    uploaded_file = st.file_uploader("📸 Upload Source", type=["jpg", "jpeg", "png"])
+    submit_btn = st.button("ARCHITECT DOCUMENT ✨")
+
+if uploaded_file and submit_btn:
+    with st.spinner("Architecting your document..."):
+        # Convert uploaded file to OpenCV format
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=uint8)
+        img = cv2.imdecode(file_bytes, 1)
         
-        # FIX: Reset the file pointer so OpenCV can read it from the beginning
-        uploaded_file.seek(0)
-        
-        if st.button("ARCHITECT DOCUMENT ✨"):
-            with st.spinner("Converting chaos to gold..."):
-                try:
-                    # Step 2: Convert to OpenCV format safely
-                    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-                    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        # 1. Image Preprocessing & OCR
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        processed_img = cv2.adaptiveThreshold(
+            cv2.GaussianBlur(gray, (5, 5), 0),
+            255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 11, 2
+        )
+        raw_text = " ".join(reader.readtext(processed_img, detail=0))
 
-                    if img is None:
-                        st.error("Error decoding image. Please try a different file.")
-                    else:
-                        # Step 3: OCR
-                        raw_text = " ".join(reader.readtext(img, detail=0))
-                        
-                        if not raw_text.strip():
-                            st.warning("No text detected.")
-                        else:
-                            # Step 4: AI Architecture
-                            prompt = f"Convert this text into a professional document with Markdown headings. End with '--- FINAL SUMMARY ---'. TEXT: {raw_text}"
-                            chat = client.chat.completions.create(
-                                messages=[{"role": "user", "content": prompt}],
-                                model="llama-3.3-70b-versatile"
-                            )
-                            full_output = chat.choices[0].message.content
-                            
-                            notes, summary = full_output.split("--- FINAL SUMMARY ---") if "--- FINAL SUMMARY ---" in full_output else (full_output, "Summary included in text.")
+        if raw_text.strip():
+            # 2. AI Structuring (Groq)
+            prompt = f"""
+            Act as a Professional Document Architect.
+            Convert this OCR text into a beautiful digital document:
+            - Use # for the Main Title
+            - Use ## for Section Headings
+            - Use bolding (**) for important technical terms
+            - End with a section titled '--- FINAL SUMMARY ---'
+            TEXT: {raw_text}
+            """
 
-                            st.session_state.processed = {"notes": notes, "summary": summary, "raw": raw_text}
-                            st.session_state.history.append(f"Note {len(st.session_state.history)+1}: {notes[:30]}...")
-
-                            # Step 5: DOCX Generation
-                            doc = Document()
-                            doc.add_heading('Architect Export', 0)
-                            doc.add_paragraph(notes)
-                            doc_io = io.BytesIO()
-                            doc.save(doc_io)
-                            st.session_state.docx_data = doc_io.getvalue()
-
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-
-with col2:
-    if "processed" in st.session_state:
-        tab1, tab2, tab3 = st.tabs(["✨ Digital Blueprint", "💡 Executive Summary", "📄 Raw OCR Buffer"])
-        
-        with tab1:
-            st.markdown(st.session_state.processed["notes"])
-            st.download_button(
-                label="📥 Download DOCX",
-                data=st.session_state.docx_data,
-                file_name="Architect_Export.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            chat = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile"
             )
-        
-        with tab2:
-            st.info(st.session_state.processed["summary"])
-            
-        with tab3:
-            st.text_area("Initial Scan", st.session_state.processed["raw"], height=300)
+            full_output = chat.choices[0].message.content
 
-st.sidebar.subheader("🕒 Session History")
-for h in st.session_state.history:
-    st.sidebar.write(h)
+            if "--- FINAL SUMMARY ---" in full_output:
+                notes, summary = full_output.split("--- FINAL SUMMARY ---")
+            else:
+                notes, summary = full_output, "Summary included in text."
 
-st.markdown('<div class="signature">DESIGNED & ENGINEERED BY<br>Muhammad Shoaib Nazz</div>', unsafe_allow_html=True)
+            # Update History
+            st.session_state.history.append(f"Note {len(st.session_state.history) + 1}: {notes[:20]}...")
+
+            # 3. Display Results
+            with col2:
+                tab1, tab2, tab3 = st.tabs(["✨ Digital Blueprint", "💡 Executive Summary", "📄 Raw OCR Buffer"])
+                
+                with tab1:
+                    st.markdown(notes)
+                    
+                    # File Exports
+                    doc_path = "Architect_Export.docx"
+                    d = Document()
+                    d.add_heading('Document Architect Pro Export', 0)
+                    d.add_paragraph(notes)
+                    d.save(doc_path)
+                    
+                    with open(doc_path, "rb") as f:
+                        st.download_button("Download DOCX", f, file_name=doc_path)
+
+                with tab2:
+                    st.write(summary.strip())
+
+                with tab3:
+                    st.code(raw_text)
+        else:
+            st.error("❌ No text detected.")
+
+# --- Footer ---
+st.markdown(f"""
+    <div style="border-top: 1px solid #1e293b; padding: 20px;">
+        <p style="text-align: center; color: #94a3b8;">DESIGNED & ENGINEERED BY</p>
+        <div class="signature-name">Muhammad Shoaib Nazz</div>
+    </div>
+    """, unsafe_allow_html=True)
