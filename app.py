@@ -6,14 +6,13 @@ from groq import Groq
 from docx import Document
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-import os
-from PIL import Image
 import io
+from PIL import Image
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Document Architect Pro", layout="wide")
 
-# --- CSS for High-Contrast & Button Visibility ---
+# --- CSS for Visibility & High-Contrast ---
 st.markdown("""
     <style>
     .stApp { background-color: #020617; color: #f8fafc; }
@@ -30,7 +29,7 @@ st.markdown("""
         margin-bottom: 25px;
     }
 
-    /* Primary Architect Button */
+    /* Primary Action Button */
     div.stButton > button {
         background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%) !important;
         color: #ffffff !important;
@@ -40,11 +39,11 @@ st.markdown("""
         padding: 10px;
     }
 
-    /* Download Buttons Visibility Fix */
+    /* Fix Download Button Visibility (White text on blue border) */
     div.stDownloadButton > button {
         background-color: #1e293b !important;
         color: #ffffff !important;
-        border: 1px solid #38bdf8 !important;
+        border: 2px solid #38bdf8 !important;
         width: 100%;
         font-weight: bold !important;
     }
@@ -58,18 +57,17 @@ st.markdown("""
 def load_ocr():
     return easyocr.Reader(['en'], gpu=False)
 
-# API Key Check from Streamlit Secrets
+# Secure API Key Check
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    st.error("❌ GROQ_API_KEY is missing in Streamlit Secrets. Please check your Dashboard.")
+    st.error("❌ API Key Missing: Please add GROQ_API_KEY to your Streamlit Secrets.")
     st.stop()
 
-# Initialize Engines
 reader = load_ocr()
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- UI Header ---
+# --- UI Layout ---
 st.title("🌌 DOCUMENT ARCHITECT PRO")
 st.markdown('<div class="jaman-tagline">Transforming handwritten chaos into structured digital gold.</div>', unsafe_allow_html=True)
 
@@ -80,9 +78,3 @@ col1, col2 = st.columns([1, 2])
 
 with col1:
     st.subheader("📸 Upload Source")
-    uploaded_file = st.file_uploader("Upload Image (JPG/PNG)", type=["jpg", "jpeg", "png"])
-    
-    if uploaded_file is not None:
-        # Display Preview
-        image_preview = Image.open(uploaded_file)
-        st.image(image_preview, caption="Target Document", use_
