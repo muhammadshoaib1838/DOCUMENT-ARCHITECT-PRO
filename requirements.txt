@@ -1,0 +1,9 @@
+easyocr
+groq
+torch
+torchvision
+opencv-python-headless
+numpy
+gradio
+python-docx
+reportlab
